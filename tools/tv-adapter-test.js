@@ -1,0 +1,38 @@
+// Real DOM tests, executed against a local Playwright Chromium instance.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { chromium } = require('playwright');
+(async () => {
+  const browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
+  const page = await browser.newPage({viewport:{width:960,height:540}});
+  await page.setContent('<html><body><nav><a id="a" href="#a" style="font-size:10px">分类甲</a><a id="b" href="#b">分类乙</a></nav><div><button id="c" style="margin-left:80px;width:120px" onclick="this.textContent=\'已选择\'">播放</button></div><form><input id="login" placeholder="账号"></form></body></html>');
+  await page.addScriptTag({content:fs.readFileSync(require('node:path').join(__dirname,'../app/src/main/assets/tv-adapter.js'),'utf8')});
+  assert.equal(await page.locator('html').getAttribute('class'),'cs-tv');
+  assert.equal(await page.locator('[data-cs-focus]').count(),1);
+  assert.equal(await page.locator('#a').evaluate(el=>getComputedStyle(el).fontSize),'18px');
+  await page.evaluate(()=>window.__clearTV.move(22));
+  assert.equal(await page.locator('[data-cs-focus]').getAttribute('id'),'b');
+  await page.evaluate(()=>window.__clearTV.move(20));
+  assert.equal(await page.locator('[data-cs-focus]').getAttribute('id'),'c');
+  const click=await page.evaluate(()=>window.__clearTV.move(23));
+  await page.mouse.click(click.x*960,click.y*540);
+  assert.equal(await page.locator('#c').textContent(),'已选择');
+  assert.equal(await page.locator('#login').getAttribute('data-cs-compact'),null);
+  await page.evaluate(()=>{const list=document.createElement('div');list.id='posters';list.style.display='flex';for(let i=0;i<3;i++){const a=document.createElement('a');a.href='#film'+i;a.innerHTML='<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">影片'+i;list.appendChild(a)}document.body.appendChild(list)});
+  await page.waitForFunction(()=>document.querySelector('#posters').hasAttribute('data-cs-grid'));
+  assert.equal(await page.locator('#posters').evaluate(el=>getComputedStyle(el).display),'grid');
+  await page.evaluate(()=>{const modal=document.createElement('div');modal.id='modal';modal.setAttribute('role','dialog');modal.style.cssText='position:fixed;inset:20px;background:white;z-index:999';modal.innerHTML='<button id="modal-ok">登录确认</button>';document.body.appendChild(modal)});
+  await page.waitForTimeout(250);await page.evaluate(()=>window.__clearTV.rescan());
+  assert.equal(await page.locator('[data-cs-focus]').getAttribute('id'),'modal-ok','modal focus must not remain in background');
+  await page.evaluate(()=>{document.querySelector('#modal').remove();const carousel=document.createElement('div');carousel.id='carousel';carousel.style.transform='translateX(0px)';for(let i=0;i<3;i++){const a=document.createElement('a');a.href='#slide'+i;a.innerHTML='<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">轮播'+i;carousel.appendChild(a)}document.body.appendChild(carousel)});
+  await page.waitForTimeout(250);await page.evaluate(()=>window.__clearTV.rescan());
+  assert.equal(await page.locator('#carousel').getAttribute('data-cs-grid'),null,'carousel structure must remain intact');
+  await page.evaluate(()=>{const b=document.createElement('button');b.id='dynamic';b.textContent='动态频道';document.body.appendChild(b)});
+  await page.waitForFunction(()=>document.querySelector('#dynamic').hasAttribute('data-cs-target'));
+  await page.evaluate(()=>window.__clearTV.enable(false));
+  assert.equal(await page.locator('[data-cs-target]').count(),0);
+  assert.equal(await page.locator('#a').evaluate(el=>getComputedStyle(el).fontSize),'10px');
+  assert.equal(await page.locator('#posters').evaluate(el=>getComputedStyle(el).display),'flex');
+  console.log('PASS: styling, single focus, directional navigation, click, protected form, dynamic content, restore original');
+  await browser.close();
+})();

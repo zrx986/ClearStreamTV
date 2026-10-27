@@ -1,0 +1,43 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { chromium } = require('playwright');
+const file = path.join(__dirname, '../app/src/main/assets/player-layout.js');
+const script = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '/* layout helper not implemented */';
+(async () => {
+  const browser = await chromium.launch({ headless:true, ...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {}) });
+  try {
+    const page=await browser.newPage({viewport:{width:1280,height:720}});
+    await page.setContent('<body style="margin:19px"><nav id="nav">导航</nav><main style="transform:translateX(23px);overflow:hidden;position:relative;width:620px"><div class="player" style="width:480px;height:270px"><video id="film" style="width:100%;height:100%"></video><button id="pause">原站暂停</button></div></main></body>');
+    await page.addScriptTag({content:script});
+    assert.equal(await page.evaluate(()=>!!window.__clearPlayerLayout),true,'Fullscreen layout API is required for embedded players');
+    await page.evaluate(()=>{window.originalVideo=document.querySelector('video');window.__clearPlayerLayout.enter();});
+    let state=await page.evaluate(()=>window.__clearPlayerLayout.snapshot());
+    assert.equal(state.active,true);assert.equal(state.kind,'video');assert.ok(Math.abs(state.width-1280)<2&&Math.abs(state.height-720)<2);
+    assert.equal(await page.evaluate(()=>window.originalVideo===document.querySelector('video')),true,'Do not recreate or move the protected player');
+    assert.equal(await page.locator('video').evaluate(v=>getComputedStyle(v).objectFit),'contain');
+    assert.equal(await page.locator('#pause').count(),1,'Original controls must remain in their player');
+    assert.equal(await page.locator('#nav').isVisible(),false);
+    await page.setViewportSize({width:1920,height:1080});
+    state=await page.evaluate(()=>window.__clearPlayerLayout.snapshot());assert.ok(state.width>=1918&&state.height>=1078);
+    await page.evaluate(()=>window.__clearPlayerLayout.exit());
+    assert.equal(await page.locator('#nav').isVisible(),true);
+    assert.equal(Math.round((await page.locator('.player').boundingBox()).width),480,'Back restores original layout');
+    console.log('PASS top-level video fit, original controls, aspect ratio, viewport resize and restoration');
+    await page.setContent('<p>这里没有播放器</p><iframe class="ads" style="width:600px;height:300px"></iframe>');await page.addScriptTag({content:script});
+    assert.equal(await page.evaluate(()=>window.__clearPlayerLayout.enter().active),false,'Do not fullscreen an ad frame');
+    console.log('PASS no player / advertising frames do not become fullscreen');
+    await page.route('https://top.test/**',r=>r.fulfill({contentType:'text/html',body:'<body><h1>原站标题</h1><div style="transform:translateX(40px);width:580px;overflow:hidden"><iframe id="player" src="https://media.test/player" style="width:480px;height:270px;border:0"></iframe></div></body>'}));
+    await page.route('https://media.test/**',r=>r.fulfill({contentType:'text/html',body:'<body style="padding:20px"><video controls style="width:320px;height:180px"></video></body>'}));
+    await page.goto('https://top.test/watch');
+    for(const frame of page.frames())await frame.addScriptTag({content:script});
+    await page.evaluate(()=>window.__clearPlayerLayout.enter());
+    const child=page.frames().find(f=>f.url().startsWith('https://media.test/'));
+    await child.waitForFunction(()=>window.__clearPlayerLayout.snapshot().active);
+    state=await page.evaluate(()=>window.__clearPlayerLayout.snapshot());assert.equal(state.kind,'iframe');assert.ok(state.width>=1918&&state.height>=1078);
+    const childState=await child.evaluate(()=>window.__clearPlayerLayout.snapshot());assert.ok(childState.width>=1918&&childState.height>=1078,'Cross-origin child video must fill its iframe too');
+    await page.evaluate(()=>window.__clearPlayerLayout.exit());await child.waitForFunction(()=>!window.__clearPlayerLayout.snapshot().active);
+    assert.equal(Math.round((await page.locator('iframe').boundingBox()).width),480);
+    console.log('PASS cross-origin iframe child fitting and coordinated exit');
+  } finally {await browser.close();}
+})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -1,0 +1,74 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'tv.clearstream'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'tv.clearstream.nosource'
+        minSdk 28
+        targetSdk 35
+        versionCode 14
+        versionName '0.1.13'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    buildFeatures { buildConfig true }
+    flavorDimensions += 'device'
+    productFlavors {
+        standard {
+            dimension 'device'
+            minSdk 28
+            versionNameSuffix '-standard'
+            buildConfigField 'boolean', 'LOW_MEMORY', 'false'
+            resValue 'string', 'app_name', '澄流 TV 无源版'
+            def engineAbi = providers.gradleProperty('engineAbi').orNull
+            if (engineAbi != null && !(engineAbi in ['armeabi-v7a','arm64-v8a','x86_64'])) throw new GradleException('Unsupported engineAbi')
+            ndk { abiFilters.addAll(engineAbi == null ? ['armeabi-v7a','arm64-v8a'] : [engineAbi]) }
+        }
+        compatible {
+            dimension 'device'
+            minSdk 23
+            versionNameSuffix '-compatible'
+            buildConfigField 'boolean', 'LOW_MEMORY', 'true'
+            resValue 'string', 'app_name', '澄流 TV 无源兼容版'
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    lint { abortOnError true; disable 'MissingTranslation', 'HardcodedText', 'SetTextI18n' }
+    sourceSets.standard.assets.srcDir(layout.buildDirectory.dir('generated/tv-engine-assets'))
+    packaging { jniLibs { useLegacyPackaging true } }
+}
+tasks.register('copyGeckoTvAdapter', Copy) {
+    from 'src/main/assets/tv-adapter.js'
+    from 'src/main/assets/cctv-player.js'
+    from 'src/main/assets/player-layout.js'
+    from 'src/main/assets/adblock-dom.js'
+    from 'src/main/assets/site-plugins.js'
+    from 'src/main/assets/site-plugins-custom.js'
+    into layout.buildDirectory.dir('generated/tv-engine-assets/tv-engine')
+    inputs.files('src/main/assets/adblock-dom.js','src/main/assets/adblock-rules.json','src/standard/assets/tv-engine/adblock-background.js','src/main/assets/site-plugins.js','src/main/assets/site-plugins-custom.js','src/main/assets/player-layout.js','src/main/assets/cctv-player.js','src/standard/assets/tv-engine/content.js','src/standard/extension-manifest.json')
+    inputs.property('applicationVersion',android.defaultConfig.versionCode.toString()+':'+android.defaultConfig.versionName)
+    doLast {
+        // ensureBuiltIn keeps equal-version extensions; version all bundled source changes.
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        ['src/main/assets/adblock-dom.js','src/main/assets/adblock-rules.json','src/standard/assets/tv-engine/adblock-background.js','src/main/assets/site-plugins.js','src/main/assets/site-plugins-custom.js','src/main/assets/player-layout.js','src/main/assets/tv-adapter.js','src/main/assets/cctv-player.js','src/standard/assets/tv-engine/content.js','src/standard/extension-manifest.json'].each { digest.update(file(it).bytes) }
+        def hash = digest.digest().encodeHex().toString()
+        def manifest = new groovy.json.JsonSlurper().parse(file('src/standard/extension-manifest.json'))
+        manifest.version = ([android.defaultConfig.versionCode] + [0,4,8].collect { Integer.parseInt(hash.substring(it,it+4),16) }).join('.')
+        new File(destinationDir,'adblock-rules.js').setText('var ClearStreamAdRules='+file('src/main/assets/adblock-rules.json').getText('UTF-8')+';','UTF-8')
+        manifest.version_name = android.defaultConfig.versionName + '-' + hash.substring(0,12)
+        new File(destinationDir,'manifest.json').setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest)),'UTF-8')
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'copyGeckoTvAdapter' }
+dependencies {
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+    implementation 'androidx.annotation:annotation:1.9.1'
+    implementation project(':core')
+    ['exoplayer','exoplayer-hls','exoplayer-dash','datasource-okhttp','ui','session'].each { part ->
+        standardImplementation "androidx.media3:media3-${part}:1.10.1"
+        compatibleImplementation "androidx.media3:media3-${part}:1.6.1"
+    }
+    standardImplementation 'org.mozilla.geckoview:geckoview:152.0.20260713164047'
+    implementation 'com.squareup.okhttp3:okhttp:5.1.0'
+}

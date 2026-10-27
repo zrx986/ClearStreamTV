@@ -1,0 +1,55 @@
+{
+  "manifest_version": 2,
+  "name": "ClearStream TV remote controls",
+  "version": "1.0",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "clearstream-tv@local"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "nativeMessagingFromContent",
+    "geckoViewAddons",
+    "webRequest",
+    "webRequestBlocking",
+    "storage",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "player-layout.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "adblock-dom.js",
+        "site-plugins.js",
+        "site-plugins-custom.js",
+        "tv-adapter.js",
+        "cctv-player.js",
+        "content.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "background": {
+    "scripts": [
+      "adblock-rules.js",
+      "adblock-background.js"
+    ]
+  }
+}
